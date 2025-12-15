@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NES-Style 8-Bit Soccer Game</title>
+<style>
+body { margin:0; background:#228B22; font-family:sans-serif; text-align:center; user-select:none; }
+canvas { display:block; margin:0 auto; background:#2E8B57; }
+#menu, #gameOverMenu { position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); z-index:10; }
+button { font-size:20px; padding:10px 20px; margin:10px; cursor:pointer; }
+</style>
+</head>
+<body>
+<div id="menu">
+  <button id="playBtn">Play</button><br>
+  <button id="difficultyBtn">Difficulty: Easy</button>
+</div>
+<div id="gameOverMenu" style="display:none;">
+  <h1 style="color:white;">Game Over!</h1>
+  <button id="restartBtn">Restart</button>
+</div>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Game state
+let gameState = "menu";
+let difficulty = "easy";
+let botSpeed = 3;
+
+// Controls
+const keys = {};
+let mouseDown = false;
+document.addEventListener('keydown', e=>keys[e.key.toLowerCase()]=true);
+document.addEventListener('keyup', e=>keys[e.key.toLowerCase()]=false);
+document.addEventListener('mousedown', ()=>mouseDown=true);
+document.addEventListener('mouseup', ()=>mouseDown=false);
+
+// Home screen buttons
+document.getElementById('playBtn').addEventListener('click', ()=>{
+  startGame();
+  document.getElementById('menu').style.display='none';
+});
+document.getElementById('difficultyBtn').addEventListener('click', ()=>{
+  if(difficulty==="easy"){ difficulty="medium"; botSpeed=4; }
+  else if(difficulty==="medium"){ difficulty="hard"; botSpeed=5; }
+  else if(difficulty==="hard"){ difficulty="nightmare"; botSpeed=6; }
+  else{ difficulty="easy"; botSpeed=3; }
+  document.getElementById('difficultyBtn').innerText="Difficulty: "+difficulty.charAt(0).toUpperCase()+difficulty.slice(1);
+});
+document.getElementById('restartBtn').addEventListener('click', ()=>{
+  startGame();
+  document.getElementById('gameOverMenu').style.display='none';
+});
+
+// Game objects
+let player, ball, bots, goalkeeper;
+let numBots = 3;
+let lastElastico = 0;
+const elasticoCooldown = 30000;
+
+// Sprite placeholders (replace these URLs with your own 8-bit sprite sheets)
+const playerSprite = new Image();
+playerSprite.src = "https://i.imgur.com/8a8YbGf.png";
+const botSprite = new Image();
+botSprite.src = "https://i.imgur.com/0rFJxqB.png";
+const goalieSprite = new Image();
+goalieSprite.src = "https://i.imgur.com/N3pLkzP.png";
+
+// Initialize game objects
+function startGame(){
+  player = { x:100, y:300, width:32, height:32, state:'idle', animFrame:0, animTick:0, hasBall:true };
+  ball = { x:player.x+12, y:player.y+12, size:8, moving:false, dx:0, dy:0 };
+  goalkeeper = { x:750, y:270, width:40, height:60, animFrame:0, animTick:0 };
+  bots=[];
+  for(let i=0;i<numBots;i++){
+    bots.push({ x:650, y:150+i*100, width:32, height:32, state:'idle', animFrame:0, animTick:0, stunned:false, stunTime:0});
+  }
+  gameState="playing";
+}
+
+// Collision detection
+function coll(a,b){
+  return a.x < b.x+b.width && a.x+a.width > b.x && a.y < b.y+b.height && a.y+a.height > b.y;
+}
+
+// Draw sprite frame
+function drawSprite(img, x, y, w, h, frameX, frameY){
+  ctx.drawImage(img, frameX*w, frameY*h, w, h, x, y, w, h);
+}
+
+// Main game loop
+function gameLoop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  if(gameState==="playing"){
+    // Player movement
+    let speed = 5;
+    if(keys['w']){ player.y-=speed; player.state='run'; }
+    if(keys['s']){ player.y+=speed; player.state='run'; }
+    if(keys['a']){ player.x-=speed; player.state='run'; }
+    if(keys['d']){ player.x+=speed; player.state='run'; }
+    if(!keys['w']&&!keys['s']&&!keys['a']&&!keys['d']) player.state='idle';
+
+    player.x=Math.max(0,Math.min(canvas.width-player.width,player.x));
+    player.y=Math.max(0,Math.min(canvas.height-player.height,player.y));
+
+    // Player animation tick
+    player.animTick++;
+    if(player.animTick%10===0) player.animFrame=(player.animFrame+1)%4;
+
+    // Ball follows player
+    if(!ball.moving){
+      ball.x=player.x+player.width/2-ball.size/2;
+      ball.y=player.y+player.height/2-ball.size/2;
+    } else {
+      ball.x+=ball.dx;
+      ball.y+=ball.dy;
+      if(ball.x<0||ball.x>canvas.width||ball.y<0||ball.y>canvas.height) ball.moving=false;
+    }
+
+    // Elastico move
+    if(keys['1'] && Date.now()-lastElastico>elasticoCooldown){
+      player.state='dribble';
+      lastElastico=Date.now();
+    }
+
+    // Dribble Q
+    if(keys['q']){
+      bots.forEach(bot=>{
+        if(!bot.stunned && coll(player,bot)){
+          bot.stunned=true;
+          bot.stunTime=Date.now();
+          bot.state='stunned';
+        }
+      });
+    }
+
+    // Shooting
+    if(keys['2'] && mouseDown){
+      ball.moving=true;
+      ball.dx=10;
+      ball.dy=0;
+      player.state='shoot';
+    }
+
+    // Draw ball
+    ctx.fillStyle="white";
+    ctx.fillRect(ball.x,ball.y,ball.size,ball.size);
+
+    // Draw player sprite
+    let frameY=0;
+    if(player.state==='idle') frameY=0;
+    else if(player.state==='run') frameY=1;
+    else if(player.state==='dribble') frameY=2;
+    else if(player.state==='shoot') frameY=3;
+    drawSprite(playerSprite, player.x, player.y, player.width, player.height, player.animFrame, frameY);
+
+    // Draw bots
+    bots.forEach(bot=>{
+      bot.animTick++;
+      if(bot.animTick%15===0) bot.animFrame=(bot.animFrame+1)%2;
+      let botFrameY=0;
+      if(bot.stunned) botFrameY=2; else botFrameY=1;
+      drawSprite(botSprite, bot.x, bot.y, bot.width, bot.height, bot.animFrame, botFrameY);
+
+      if(!bot.stunned){
+        if(player.x>bot.x) bot.x+=botSpeed;
+        if(player.x<bot.x) bot.x-=botSpeed;
+        if(player.y>bot.y) bot.y+=botSpeed;
+        if(player.y<bot.y) bot.y-=botSpeed;
+      } else if(Date.now()-bot.stunTime>3000){ bot.stunned=false; bot.state='chase'; }
+
+      // Game over
+      if(coll(player,bot) && player.hasBall){
+        gameState="gameover";
+        document.getElementById('gameOverMenu').style.display='block';
+      }
+    });
+
+    // Draw goalkeeper
+    drawSprite(goalieSprite, goalkeeper.x, goalkeeper.y, goalkeeper.width, goalkeeper.height, goalkeeper.animFrame,0);
+    if(ball.y>goalkeeper.y+goalkeeper.height/2) goalkeeper.y+=botSpeed;
+    if(ball.y<goalkeeper.y+goalkeeper.height/2) goalkeeper.y-=botSpeed;
+
+    // Goal detection
+    if(ball.x+ball.size>goalkeeper.x && ball.y+ball.size>goalkeeper.y && ball.y<goalkeeper.y+goalkeeper.height){
+      ball.moving=false; // goalkeeper saves
+    } else if(ball.x+ball.size>canvas.width){
+      ball.moving=false;
+      ball.x=player.x+player.width/2-ball.size/2;
+      ball.y=player.y+player.height/2-ball.size/2;
+    }
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
